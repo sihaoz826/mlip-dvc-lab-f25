@@ -15,13 +15,17 @@ y_test = df['target']
 y_pred = model.predict(X_test)
 
 # TODO: Calculate evaluation metrics
-accuracy = None
-precision = None
-recall = None
-f1 = None
+accuracy = accuracy_score(y_test, y_pred)
+precision = precision_score(y_test, y_pred)
+recall = recall_score(y_test, y_pred)
+f1 = f1_score(y_test, y_pred)
 
 # TODO: Create metrics dictionary and save to JSON
 metrics = {
+    'accuracy': float(accuracy),
+    'precision': float(precision),
+    'recall': float(recall),
+    'f1': float(f1)
 }
 
 Path('metrics').mkdir(exist_ok=True)
