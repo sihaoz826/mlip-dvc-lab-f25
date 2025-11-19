@@ -713,20 +713,233 @@ This pushes experiment data to the Git remote, allowing team members to access a
    - W&B focuses on the training loop and model metrics
    - DVC ensures reproducibility, W&B provides insights
 
-**Example Workflow:**
-```bash
-# Use DVC to run experiment with versioned data and code
-dvc exp run -S train.n_estimators=100
+#### Concrete Example: Training a Neural Network
 
-# Log to W&B during training for real-time monitoring
-# (in your training script)
-import wandb
-wandb.init(project="my-project")
-wandb.log({"accuracy": accuracy, "f1": f1})
+**Scenario:** You're training a neural network for image classification. You want reproducibility (DVC) and real-time monitoring during training (W&B).
 
-# DVC tracks the experiment, W&B visualizes it
-# Both are valuable for different purposes
+**1. Setup with DVC (Pipeline Management)**
+
+Your `dvc.yaml` defines the pipeline:
+```yaml
+stages:
+  preprocess:
+    cmd: python scripts/preprocess.py
+    deps:
+      - data/raw/images/
+      - scripts/preprocess.py
+    outs:
+      - data/processed/train/
+      - data/processed/val/
+  
+  train:
+    cmd: python scripts/train.py
+    deps:
+      - data/processed/train/
+      - scripts/train.py
+      - params.yaml
+    params:
+      - train.learning_rate
+      - train.batch_size
+      - train.epochs
+    outs:
+      - models/best_model.pth
 ```
+
+**2. Run Experiment with DVC**
+
+```bash
+dvc exp run -S train.learning_rate=0.001 -S train.batch_size=32
+```
+
+This:
+- Tracks which dataset version was used
+- Records exact hyperparameters
+- Creates a Git commit with experiment metadata
+- Ensures full reproducibility
+
+**3. During Training: Log to W&B**
+
+Your `scripts/train.py` looks like this:
+
+```python
+import wandb
+import torch
+from dvc.api import params_show
+
+# Load hyperparameters from params.yaml (DVC tracks this)
+params = params_show()
+learning_rate = params['train']['learning_rate']
+batch_size = params['train']['batch_size']
+
+# Initialize W&B for real-time monitoring
+wandb.init(
+    project="image-classification",
+    config={
+        "learning_rate": learning_rate,
+        "batch_size": batch_size,
+        "epochs": params['train']['epochs']
+    }
+)
+
+# Training loop
+for epoch in range(num_epochs):
+    for batch in dataloader:
+        # ... training code ...
+        loss = train_step(batch)
+        
+        # Log to W&B in real-time
+        wandb.log({
+            "loss": loss,
+            "epoch": epoch,
+            "learning_rate": current_lr
+        })
+    
+    # Evaluate on validation set
+    val_accuracy = evaluate(model, val_loader)
+    wandb.log({"val_accuracy": val_accuracy})
+    
+    # Save checkpoint
+    torch.save(model.state_dict(), "models/best_model.pth")
+
+wandb.finish()
+```
+
+**4. What Each Tool Provides**
+
+**DVC provides:**
+- Exact dataset version used (hash tracked in `dvc.lock`)
+- Exact code version (Git commit)
+- Exact hyperparameters (in `dvc.lock`)
+- Full pipeline reproducibility
+- Can reproduce the exact experiment later
+
+**W&B provides:**
+- Real-time loss plots during training
+- Interactive charts showing loss, accuracy over time
+- Hyperparameter comparison across runs
+- Model architecture visualization
+- Team dashboard to view results
+
+**5. The Complete Picture**
+
+**During Training:**
+```
+You run: dvc exp run -S train.learning_rate=0.001
+
+DVC:
+├── Tracks: dataset version, code version, hyperparameters
+├── Creates: Git commit with experiment metadata
+└── Ensures: Full reproducibility
+
+W&B:
+├── Shows: Live loss curve updating in real-time
+├── Displays: Validation accuracy as training progresses
+├── Logs: Every metric, every epoch
+└── Provides: Beautiful interactive dashboard
+```
+
+**After Training:**
+```
+DVC:
+├── You can: git checkout any experiment
+├── You can: dvc repro to reproduce exact results
+└── You have: Complete audit trail
+
+W&B:
+├── You can: Compare 10 experiments side-by-side
+├── You can: See which hyperparameters matter most
+├── You can: Share results with team via web UI
+└── You have: Rich visualizations and analysis
+```
+
+**6. Real-World Example: Comparing 5 Experiments**
+
+**Using DVC:**
+```bash
+# Run 5 experiments
+dvc exp run -S train.learning_rate=0.001
+dvc exp run -S train.learning_rate=0.01
+dvc exp run -S train.learning_rate=0.0001
+dvc exp run -S train.batch_size=16
+dvc exp run -S train.batch_size=64
+
+# Compare in terminal
+dvc exp show
+```
+
+**Output:**
+```
+Experiment    learning_rate  batch_size  final_accuracy
+─────────────────────────────────────────────────────
+exp-1         0.001          32          0.85
+exp-2         0.01           32          0.82
+exp-3         0.0001         32          0.88
+exp-4         0.001          16          0.86
+exp-5         0.001          64          0.84
+```
+
+**Using W&B:**
+- Open web dashboard
+- See all 5 experiments in one view
+- Interactive charts showing:
+  - Loss curves for all experiments overlaid
+  - Hyperparameter importance analysis
+  - Parallel coordinates plot
+  - Confusion matrices for each model
+
+**7. Why Use Both?**
+
+**DVC for:**
+- "I need to reproduce experiment #3 exactly"
+- "Which dataset version was used for this model?"
+- "Can I checkout and rerun the experiment from last month?"
+- "I want full version control for my ML pipeline"
+
+**W&B for:**
+- "Is my model still training well? Let me check the live plot"
+- "Which hyperparameter had the biggest impact?"
+- "Let me share these results with my team via the web UI"
+- "I want to visualize the model architecture"
+
+**8. The Workflow Together**
+
+```bash
+# 1. Run experiment with DVC (ensures reproducibility)
+dvc exp run -S train.learning_rate=0.001
+
+# 2. During training, W&B logs metrics automatically
+# (happens in your training script)
+
+# 3. After training, compare experiments
+dvc exp show          # Terminal comparison
+# Open W&B dashboard   # Visual comparison
+
+# 4. Find best experiment
+# W&B shows: "Experiment with lr=0.001 had best accuracy"
+
+# 5. Apply best experiment
+dvc exp apply <best-experiment>
+
+# 6. Reproduce later
+git checkout <experiment-commit>
+dvc checkout
+dvc repro  # Exact same results!
+```
+
+**Key Takeaway:**
+
+- **DVC** = "I can reproduce this exact experiment"
+- **W&B** = "I can understand and visualize what happened"
+
+They complement each other:
+- DVC ensures you can **reproduce**
+- W&B helps you **understand** and **share**
+
+Think of it like:
+- **DVC** = version control system (like Git for code)
+- **W&B** = analytics dashboard (like Google Analytics for websites)
+
+You need both: version control to track changes, and analytics to understand them.
 
 ### DVC for Team Project: Data Stream and Design Considerations
 
